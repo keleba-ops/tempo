@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#202d24" />
+    <title>Tempo — You're offline</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+        background: #f5f2ea; color: #1f2922;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .card { max-width: 420px; text-align: center; }
+      .mark {
+        width: 62px; height: 62px; border-radius: 50%; border: 1px solid #d5cebf;
+        display: grid; place-items: center; margin: 0 auto 26px; color: #b65332; font-size: 26px;
+      }
+      .logo { font-family: Georgia, serif; font-size: 28px; font-weight: 600; letter-spacing: -0.05em; }
+      .logo span { color: #b65332; }
+      h1 { font-family: "Instrument Serif", Georgia, serif; font-size: 46px; font-weight: 400; line-height: 0.98; letter-spacing: -0.03em; margin: 28px 0 14px; }
+      p { color: #666c62; font-size: 14px; line-height: 1.65; margin: 0 0 24px; }
+      button {
+        border: 0; background: #202d24; color: #f8f3e9; border-radius: 10px; padding: 13px 20px;
+        font-weight: 600; font-size: 13px; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="mark">◷</div>
+      <div class="logo">tempo<span>.</span></div>
+      <h1>Off the clock.</h1>
+      <p>You're offline right now. Reconnect when you can and your appointments, favorites, and openings will be waiting.</p>
+      <button onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>
