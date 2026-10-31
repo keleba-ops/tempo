@@ -17,6 +17,9 @@ function getTransporter(): Transporter | null {
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
     secure: Number(process.env.SMTP_PORT) === 465,
     auth: process.env.SMTP_USER
       ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || '' }
@@ -108,9 +111,11 @@ export async function deliverEmail(
     try {
       await transport.sendMail({ from: FROM, to: opts.to, subject: opts.subject, html, text });
       status = 'sent';
+      console.log(`[tempo] email '${opts.kind}' sent`);
     } catch (err) {
       status = 'failed';
       error = err instanceof Error ? err.message : 'Unknown delivery error';
+      console.error(`[tempo] email '${opts.kind}' failed: ${error}`);
     }
   } else {
     try {
