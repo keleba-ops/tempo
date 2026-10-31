@@ -39,11 +39,9 @@ export function AuthGate() {
     setSubmitting(true);
     try {
       if (mode === 'register') {
-        if (password.length < 8) throw new Error('Your password needs at least 8 characters.');
         const created = await register({
           name,
           email,
-          password,
           role,
           timezone: browserTimezone(),
           ...(role === 'owner' ? { businessName } : {}),
@@ -102,17 +100,21 @@ export function AuthGate() {
         <label className="field-label">Email
           <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
         </label>
-        <label className="field-label">Password
-          <input
-            className="input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-            minLength={mode === 'register' ? 8 : undefined}
-            required
-          />
-        </label>
+        {mode === 'login' && (
+          <label className="field-label">Password
+            <input
+              className="input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </label>
+        )}
+        {mode === 'register' && (
+          <p className="gate-sub">We'll create a temporary password for you on the next screen, then you'll choose your own.</p>
+        )}
 
         {error && <p className="gate-error" role="alert">{error}</p>}
         <button type="submit" className="btn btn-accent btn-block btn-lg" disabled={submitting}>

@@ -12,6 +12,7 @@ export interface User {
   phone: string;
   address: string;
   city: string;
+  mustChangePassword?: boolean;
   businessId?: string;
   businessSlug?: string;
 }

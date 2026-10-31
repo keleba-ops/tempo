@@ -43,6 +43,7 @@ interface UserRow {
   phone: string;
   address: string;
   city: string;
+  must_change_password: number;
   business_id: string | null;
   business_slug: string | null;
 }
@@ -64,6 +65,7 @@ export function mapUser(row: UserRow): User {
     phone: row.phone,
     address: row.address,
     city: row.city,
+    mustChangePassword: Boolean(row.must_change_password),
     ...(row.business_id ? { businessId: row.business_id, businessSlug: row.business_slug ?? undefined } : {}),
   };
 }
@@ -92,6 +94,19 @@ export function createSession(db: DatabaseSync, userId: string): string {
     'DELETE FROM sessions WHERE user_id = ? AND id NOT IN (SELECT id FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10)',
   ).run(userId, userId);
   return token;
+}
+
+/** Signs the user out everywhere except the session making the request (used after a password change). */
+export function destroyOtherSessions(db: DatabaseSync, userId: string, keepToken: string | undefined): void {
+  if (keepToken) db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(userId, tokenHash(keepToken));
+  else db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+}
+
+/** Readable one-time password, e.g. K7QM-9XTD-R2WH. Unambiguous alphabet (no 0/O/1/I/L). */
+export function generateTemporaryPassword(): string {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const group = () => Array.from({ length: 4 }, () => alphabet[crypto.randomInt(alphabet.length)]).join('');
+  return `${group()}-${group()}-${group()}`;
 }
 
 export function destroySession(db: DatabaseSync, token: string): void {

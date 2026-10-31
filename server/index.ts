@@ -49,6 +49,15 @@ app.use(
 );
 app.use(cookieParser());
 app.use(attachUser(db));
+// Accounts holding a temporary password can do nothing else until they set their own.
+app.use('/api', (req, res, next) => {
+  if (!req.user?.mustChangePassword) return next();
+  const allowed =
+    (req.method === 'POST' && (req.path === '/auth/change-password' || req.path === '/auth/logout')) ||
+    (req.path === '/me' && (req.method === 'GET' || req.method === 'PATCH'));
+  if (allowed) return next();
+  res.status(403).json({ error: 'Please set your own password to continue.', code: 'PASSWORD_CHANGE_REQUIRED' });
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: 'tempo', time: new Date().toISOString() });

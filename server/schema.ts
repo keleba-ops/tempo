@@ -191,6 +191,7 @@ function ensureMigrations(db: DatabaseSync): void {
   const migrations: { table: string; column: string; definition: string }[] = [
     { table: 'users', column: 'phone', definition: "TEXT NOT NULL DEFAULT ''" },
     { table: 'users', column: 'address', definition: "TEXT NOT NULL DEFAULT ''" },
+    { table: 'users', column: 'must_change_password', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { table: 'users', column: 'city', definition: "TEXT NOT NULL DEFAULT ''" },
     { table: 'services', column: 'house_call', definition: 'INTEGER NOT NULL DEFAULT 0' },
     { table: 'bookings', column: 'location_type', definition: "TEXT NOT NULL DEFAULT 'business'" },

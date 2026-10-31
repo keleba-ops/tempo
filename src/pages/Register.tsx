@@ -34,10 +34,8 @@ export function Register() {
   const [role, setRole] = useState<Role>(initialRole);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [timezone, setTimezone] = useState('Africa/Gaborone');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,10 +54,6 @@ export function Register() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError('');
-    if (password.length < 8) {
-      setError('Your password needs at least 8 characters.');
-      return;
-    }
     if (role === 'owner' && !businessName.trim()) {
       setError('Add your business name to create an owner account.');
       return;
@@ -69,7 +63,6 @@ export function Register() {
       const signedIn = await register({
         name: name.trim(),
         email: email.trim(),
-        password,
         role,
         ...(role === 'owner' ? { businessName: businessName.trim(), timezone } : {}),
       });
@@ -232,30 +225,7 @@ export function Register() {
                 </label>
               </div>
             )}
-            <label className="field">
-              <span className="field-label">Password</span>
-              <div className="input-with-icon">
-                <LockKeyhole size={17} />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="At least 8 characters"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                />
-                <button
-                  type="button"
-                  className="input-action"
-                  onClick={() => setShowPassword((show) => !show)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              <span className="field-hint">Use 8 or more characters.</span>
-            </label>
+            <p className="field-hint">We'll create a temporary password for you on the next screen, then you'll choose your own.</p>
             <button type="submit" className="btn btn-accent btn-block btn-lg" disabled={submitting}>
               {submitting ? <Spinner /> : <>Create account <ArrowRight size={17} /></>}
             </button>

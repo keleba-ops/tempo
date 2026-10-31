@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Loader2, MapPin, Search, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import type { BusinessSummary } from '../../shared/types';
 import { get } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import { sameCity } from '../lib/cities';
 import { BusinessCard } from '../components/BusinessCard';
 import { SkeletonCard } from '../components/Loading';
 import { EmptyState } from '../components/EmptyState';
@@ -21,6 +23,17 @@ export function Explore() {
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const nearOnly = searchParams.get('near') === '1' && Boolean(user?.city);
+
+  const shown = nearOnly ? businesses.filter((b) => sameCity(b.city, user?.city)) : businesses;
+
+  function toggleNear() {
+    const next = new URLSearchParams(searchParams);
+    if (nearOnly) next.delete('near');
+    else next.set('near', '1');
+    setSearchParams(next);
+  }
 
   useEffect(() => setInput(q), [q]);
 
@@ -33,7 +46,13 @@ export function Explore() {
     get<{ businesses: BusinessSummary[]; categories: Category[] }>(`/businesses?${params.toString()}`)
       .then((data) => {
         if (cancelled) return;
-        setBusinesses(data.businesses);
+        // Providers in the visitor's own city first.
+        const mine = user?.city;
+        setBusinesses(
+          mine
+            ? [...data.businesses].sort((a, b) => Number(sameCity(b.city, mine)) - Number(sameCity(a.city, mine)))
+            : data.businesses,
+        );
         setCategories(data.categories);
       })
       .catch(() => {})
@@ -41,7 +60,7 @@ export function Explore() {
     return () => {
       cancelled = true;
     };
-  }, [q, category]);
+  }, [q, category, user?.city]);
 
   function setCategory(name: string) {
     const next = new URLSearchParams(searchParams);
@@ -107,6 +126,11 @@ export function Explore() {
             <button className={`chip ${category === 'All' ? 'active' : ''}`} onClick={() => setCategory('All')}>
               All places
             </button>
+            {user?.city && (
+              <button className={`chip near-chip ${nearOnly ? 'active' : ''}`} onClick={toggleNear}>
+                <MapPin size={14} /> Near me · {user.city}
+              </button>
+            )}
             {categories.map((item) => (
               <button
                 key={item.name}
@@ -120,15 +144,15 @@ export function Explore() {
             ))}
           </div>
           <div className="sort-note">
-            <SlidersHorizontal size={15} /> Sorted by most loved
+            <SlidersHorizontal size={15} /> {user?.city ? `Providers in ${user.city} first` : 'Sorted by most loved'}
           </div>
         </div>
 
-        {(q || category !== 'All') && (
+        {(q || category !== 'All' || nearOnly) && (
           <div className="active-filters">
             <span>
-              {loading ? <Loader2 size={13} className="spin" /> : businesses.length} result
-              {businesses.length === 1 ? '' : 's'}
+              {loading ? <Loader2 size={13} className="spin" /> : shown.length} result
+              {shown.length === 1 ? '' : 's'}
               {q && <> for “{q}”</>}
               {category !== 'All' && <> in {category}</>}
             </span>
@@ -140,10 +164,10 @@ export function Explore() {
           <div className="explore-grid">
             {Array.from({ length: 6 }).map((_, index) => <SkeletonCard key={index} />)}
           </div>
-        ) : businesses.length > 0 ? (
+        ) : shown.length > 0 ? (
           <>
             <div className="explore-grid">
-              {businesses.map((business) => (
+              {shown.map((business) => (
                 <BusinessCard key={business.id} business={business} />
               ))}
             </div>

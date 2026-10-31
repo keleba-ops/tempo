@@ -4,7 +4,9 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   clearSessionCookie,
   createSession,
+  destroyOtherSessions,
   destroySession,
+  generateTemporaryPassword,
   findUserByEmail,
   findUserById,
   hashPassword,
@@ -47,7 +49,7 @@ function rememberDevice(account: string, id: string | null) {
 const registerSchema = z.object({
   name: z.string().trim().min(2, 'Please enter your full name.').max(80),
   email: z.string().trim().email('Please enter a valid email address.').max(160),
-  password: z.string().min(8, 'Your password needs at least 8 characters.').max(200),
+  password: z.string().min(8, 'Your password needs at least 8 characters.').max(200).optional(),
   role: z.enum(['owner', 'customer']),
   businessName: z.string().trim().max(100).optional(),
   timezone: z.string().trim().max(80).optional(),
@@ -56,6 +58,11 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.string().trim().email('Please enter a valid email address.'),
   password: z.string().min(1, 'Please enter your password.'),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Please enter your current password.').max(200),
+  newPassword: z.string().min(8, 'Your new password needs at least 8 characters.').max(200),
 });
 
 const profileSchema = z.object({
@@ -98,23 +105,28 @@ export function authRouter(db: DatabaseSync): Router {
     if (input.role === 'owner' && !input.businessName?.trim()) {
       throw new ApiError(400, 'Please add your business name to create an owner account.');
     }
-    const weak = weakPasswordReason(input.password, input.email);
-    if (weak) throw new ApiError(400, weak);
+    // No password supplied -> we issue a one-time temporary password and require a change on first sign-in.
+    const temporaryPassword = input.password ? null : generateTemporaryPassword();
+    const initialPassword = input.password ?? temporaryPassword!;
+    if (input.password) {
+      const weak = weakPasswordReason(input.password, input.email);
+      if (weak) throw new ApiError(400, weak);
+    }
     if (findUserByEmail(db, input.email)) {
       throw new ApiError(409, 'An account with that email already exists. Try signing in instead.');
     }
 
     const userId = uid();
-    const passwordHash = hashPassword(input.password);
+    const passwordHash = hashPassword(initialPassword);
     const timestamp = nowIso();
     const timezone = input.timezone && validTimezone(input.timezone) ? input.timezone : 'Africa/Gaborone';
 
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare(
-        `INSERT INTO users (id, name, email, password_hash, role, email_notifications, in_app_notifications, created_at)
-         VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
-      ).run(userId, input.name.trim(), input.email.trim().toLowerCase(), passwordHash, input.role, timestamp);
+        `INSERT INTO users (id, name, email, password_hash, role, email_notifications, in_app_notifications, created_at, must_change_password)
+         VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)`,
+      ).run(userId, input.name.trim(), input.email.trim().toLowerCase(), passwordHash, input.role, timestamp, temporaryPassword ? 1 : 0);
 
       if (input.role === 'owner') {
         const businessId = uid();
@@ -153,7 +165,7 @@ export function authRouter(db: DatabaseSync): Router {
     const token = createSession(db, userId);
     setSessionCookie(res, token);
     const row = findUserById(db, userId)!;
-    res.status(201).json({ user: mapUser(row), token });
+    res.status(201).json({ user: mapUser(row), token, ...(temporaryPassword ? { temporaryPassword } : {}) });
   });
 
   router.post('/auth/login', (req, res) => {
@@ -210,7 +222,41 @@ export function authRouter(db: DatabaseSync): Router {
       req.user!.id,
     );
     const row = findUserById(db, req.user!.id)!;
+    if (row.role === 'owner' && row.business_id) {
+      // A brand-new business has no address yet: use the owner's location so clients can find it nearby.
+      db.prepare(
+        `UPDATE businesses SET address = CASE WHEN address = '' THEN ? ELSE address END,
+                               city = CASE WHEN city = '' THEN ? ELSE city END WHERE id = ?`,
+      ).run(row.address, row.city, row.business_id);
+    }
     res.json({ user: mapUser(row) });
+  });
+
+  router.post('/auth/change-password', requireAuth, (req, res) => {
+    const input = parseBody(changePasswordSchema, req.body);
+    const row = findUserById(db, req.user!.id)!;
+    const key = `chpw|${row.id}`;
+    const wait = loginFailures.blockedFor(key);
+    if (wait > 0) {
+      res.setHeader('Retry-After', String(wait));
+      throw new ApiError(429, 'Too many attempts. Please wait a few minutes and try again.');
+    }
+    if (!verifyPassword(input.currentPassword, row.password_hash)) {
+      loginFailures.fail(key);
+      throw new ApiError(400, 'Your current password is not correct.');
+    }
+    loginFailures.clear(key);
+    if (input.newPassword === input.currentPassword) {
+      throw new ApiError(400, 'Please choose a new password that is different from your temporary one.');
+    }
+    const weak = weakPasswordReason(input.newPassword, row.email);
+    if (weak) throw new ApiError(400, weak);
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(
+      hashPassword(input.newPassword),
+      row.id,
+    );
+    destroyOtherSessions(db, row.id, req.sessionToken);
+    res.json({ user: mapUser(findUserById(db, row.id)!) });
   });
 
   router.patch('/me/preferences', requireAuth, (req, res) => {

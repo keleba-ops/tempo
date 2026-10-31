@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Modal } from './Modal';
 import { useAuth } from '../context/AuthContext';
 import { isIosDevice } from '../lib/pwa';
+import { needsSetup } from './SetupFlow';
 
 interface Step { icon: LucideIcon; title: string; body: string }
 
@@ -36,7 +37,7 @@ export function WelcomeWizard() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
-  const key = user ? `tempo-wizard-seen:${user.id}` : null;
+  const key = user && !needsSetup(user) ? `tempo-wizard-seen:${user.id}` : null;
 
   useEffect(() => {
     if (!key) return setOpen(false);

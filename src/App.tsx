@@ -15,6 +15,7 @@ import { GetApp } from './pages/GetApp';
 import { InstallPrompt } from './components/InstallPrompt';
 import { AuthGate } from './components/AuthGate';
 import { WelcomeWizard } from './components/WelcomeWizard';
+import { SetupFlow } from './components/SetupFlow';
 import { AccountOverview } from './pages/account/AccountOverview';
 import { AccountBookings } from './pages/account/AccountBookings';
 import { AccountFavorites } from './pages/account/AccountFavorites';
@@ -125,6 +126,7 @@ export default function App() {
         <Route path="/home" element={<Navigate to="/" replace />} />
       </Routes>
       <AuthGate />
+      <SetupFlow />
       <WelcomeWizard />
       <InstallPrompt />
     </>

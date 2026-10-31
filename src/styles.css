@@ -13257,3 +13257,9 @@ h4 {
 .wizard-actions { display: flex; justify-content: space-between; width: 100%; gap: 10px; }
 .wizard-actions .btn { flex: 1; }
 .gate .input { width: 100%; box-sizing: border-box; }
+.temp-pass { display: grid; gap: 6px; justify-items: start; background: var(--gold-soft); border-radius: 12px; padding: 12px 14px; }
+.temp-pass span { font-size: 12px; color: var(--muted); }
+.temp-pass strong { font: 700 20px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.06em; color: var(--ink); }
+.gate select.input { appearance: auto; }
+.gate-link { border: 0; background: none; color: var(--muted); font: 500 13px var(--sans); text-decoration: underline; cursor: pointer; justify-self: center; }
+.near-chip { border-style: dashed; }
