@@ -93,9 +93,12 @@ export async function deliverEmail(
     subject: string;
     kind: string;
     content: EmailContent;
+    /** Secrets (e.g. temporary passwords) to mask in the stored outbox copy and dev preview file. */
+    redact?: string[];
   },
 ): Promise<void> {
   const { html, text } = renderEmail(opts.content);
+  const mask = (value: string) => (opts.redact ?? []).reduce((acc, secret) => (secret ? acc.split(secret).join('••••••••') : acc), value);
   const id = uid();
   let status = 'logged';
   let error: string | null = null;
@@ -114,7 +117,7 @@ export async function deliverEmail(
       const dir = path.resolve(process.cwd(), 'data', 'emails');
       fs.mkdirSync(dir, { recursive: true });
       const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${id.slice(0, 8)}.html`;
-      fs.writeFileSync(path.join(dir, filename), html, 'utf8');
+      fs.writeFileSync(path.join(dir, filename), mask(html), 'utf8');
     } catch {
       // The outbox remains the source of truth if the dev preview cannot be written.
     }
@@ -122,5 +125,5 @@ export async function deliverEmail(
 
   db.prepare(
     'INSERT INTO email_outbox (id, user_id, to_email, subject, html, text, kind, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  ).run(id, opts.userId, opts.to, opts.subject, html, text, opts.kind, status, error, nowIso());
+  ).run(id, opts.userId, opts.to, opts.subject, mask(html), mask(text), opts.kind, status, error, nowIso());
 }

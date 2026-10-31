@@ -114,6 +114,7 @@ export async function saveProfile(input: {
   phone?: string;
   address?: string;
   city?: string;
+  applyToBusiness?: boolean;
 }) {
   return patch<{ user: User }>('/me', input);
 }

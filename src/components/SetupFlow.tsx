@@ -49,7 +49,7 @@ export function SetupFlow() {
     if (address.trim().length < 3) return setError('Please enter your street address or area.');
     setBusy(true);
     try {
-      const data = await saveProfile({ address: address.trim(), city });
+      const data = await saveProfile({ address: address.trim(), city, applyToBusiness: user?.role === 'owner' });
       updateUser(data.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save your location.');

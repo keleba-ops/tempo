@@ -19,6 +19,7 @@ import { getParam, parseBody } from '../http.js';
 import { notifyUser } from '../notifications.js';
 import { getBusinessRowBySlug } from '../serializers.js';
 import { ApiError, nowIso, slugify, uid } from '../utils.js';
+import { deliverEmail } from '../email.js';
 import { createFailureGuard, weakPasswordReason } from '../security.js';
 
 // Burns the same time as a real check so unknown emails can't be told apart by response speed.
@@ -70,6 +71,8 @@ const profileSchema = z.object({
   phone: z.string().trim().max(40).optional(),
   address: z.string().trim().max(300).optional(),
   city: z.string().trim().max(120).optional(),
+  // Only the owner's first-run "Where is your business?" step sets this, so a personal address is never copied implicitly.
+  applyToBusiness: z.boolean().optional(),
 });
 
 const prefsSchema = z.object({
@@ -165,6 +168,28 @@ export function authRouter(db: DatabaseSync): Router {
     const token = createSession(db, userId);
     setSessionCookie(res, token);
     const row = findUserById(db, userId)!;
+    if (temporaryPassword) {
+      // Fire-and-forget: a mail problem must never block sign-up (the password is also shown on screen once).
+      void deliverEmail(db, {
+        userId: row.id,
+        to: row.email,
+        subject: 'Your Tempo temporary password',
+        kind: 'temporary_password',
+        redact: [temporaryPassword],
+        content: {
+          kicker: 'Welcome to Tempo',
+          heading: `Hi ${row.name.split(' ')[0]}, your account is ready`,
+          intro: 'Use this temporary password to finish setting up. You will be asked to choose your own password the first time you sign in.',
+          details: [
+            { label: 'Email', value: row.email },
+            { label: 'Temporary password', value: temporaryPassword },
+          ],
+          ctaLabel: 'Open Tempo',
+          ctaUrl: '/',
+          footnote: 'If you did not create a Tempo account, you can ignore this email. The temporary password stops working once you set your own.',
+        },
+      }).catch(() => {});
+    }
     res.status(201).json({ user: mapUser(row), token, ...(temporaryPassword ? { temporaryPassword } : {}) });
   });
 
@@ -222,8 +247,8 @@ export function authRouter(db: DatabaseSync): Router {
       req.user!.id,
     );
     const row = findUserById(db, req.user!.id)!;
-    if (row.role === 'owner' && row.business_id) {
-      // A brand-new business has no address yet: use the owner's location so clients can find it nearby.
+    if (input.applyToBusiness && row.role === 'owner' && row.business_id) {
+      // First-run setup only, and only fills blanks: never overwrites an address the owner already set.
       db.prepare(
         `UPDATE businesses SET address = CASE WHEN address = '' THEN ? ELSE address END,
                                city = CASE WHEN city = '' THEN ? ELSE city END WHERE id = ?`,
