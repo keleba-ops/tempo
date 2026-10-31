@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Modal } from './Modal';
 import { Logo } from './Logo';
 import { Spinner } from './Loading';
+import { IntroTour } from './IntroTour';
 import { useAuth } from '../context/AuthContext';
 import { browserTimezone } from '../lib/format';
 import type { Role } from '../../shared/types';
@@ -12,6 +13,9 @@ export function AuthGate() {
   const { user, loading, login, register } = useAuth();
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [introSeen, setIntroSeen] = useState(() => {
+    try { return Boolean(localStorage.getItem('tempo-intro-seen')); } catch { return false; }
+  });
   const [mode, setMode] = useState<'register' | 'login'>('register');
   const [role, setRole] = useState<Role>('customer');
   const [name, setName] = useState('');
@@ -23,6 +27,11 @@ export function AuthGate() {
 
   // The dedicated pages handle their own forms.
   if (loading || user || pathname === '/login' || pathname === '/register') return null;
+
+  function finishIntro() {
+    try { localStorage.setItem('tempo-intro-seen', '1'); } catch { /* ignore */ }
+    setIntroSeen(true);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -50,6 +59,8 @@ export function AuthGate() {
       setSubmitting(false);
     }
   }
+
+  if (!introSeen) return <IntroTour onDone={finishIntro} />;
 
   return (
     <Modal open onClose={() => {}} hideClose size="sm">
