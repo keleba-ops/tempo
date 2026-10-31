@@ -17,16 +17,11 @@ import { getParam, parseBody } from '../http.js';
 import { notifyUser } from '../notifications.js';
 import { getBusinessRowBySlug } from '../serializers.js';
 import { ApiError, nowIso, slugify, uid } from '../utils.js';
-import { rateLimit, weakPasswordReason } from '../security.js';
+import { createFailureGuard, weakPasswordReason } from '../security.js';
 
 // Burns the same time as a real check so unknown emails can't be told apart by response speed.
 const DUMMY_HASH = hashPassword('not-a-real-password');
-const perEmailLogin = rateLimit({
-  windowMs: 15 * 60_000,
-  max: 8,
-  message: 'Too many sign-in attempts for this account. Please wait a few minutes or try again later.',
-  key: (req) => String(req.body?.email ?? '').trim().toLowerCase().slice(0, 160) || undefined,
-});
+const loginFailures = createFailureGuard({ windowMs: 15 * 60_000, max: 8 });
 
 const registerSchema = z.object({
   name: z.string().trim().min(2, 'Please enter your full name.').max(80),
@@ -140,13 +135,21 @@ export function authRouter(db: DatabaseSync): Router {
     res.status(201).json({ user: mapUser(row), token });
   });
 
-  router.post('/auth/login', perEmailLogin, (req, res) => {
+  router.post('/auth/login', (req, res) => {
     const input = parseBody(loginSchema, req.body);
     const row = findUserByEmail(db, input.email);
+    const guardKey = `${req.ip}|${input.email.trim().toLowerCase()}`;
+    const wait = loginFailures.blockedFor(guardKey);
+    if (wait > 0) {
+      res.setHeader('Retry-After', String(wait));
+      throw new ApiError(429, 'Too many failed sign-in attempts from this device. Please wait a few minutes and try again.');
+    }
     const ok = verifyPassword(input.password, row ? row.password_hash : DUMMY_HASH);
     if (!row || !ok) {
+      loginFailures.fail(guardKey);
       throw new ApiError(401, 'That email and password do not match. Please try again.');
     }
+    loginFailures.clear(guardKey);
     const token = createSession(db, row.id);
     setSessionCookie(res, token);
     res.json({ user: mapUser(row), token });

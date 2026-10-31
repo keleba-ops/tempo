@@ -65,3 +65,35 @@ export function weakPasswordReason(password: string, email: string): string | nu
   if (/^(.)\1+$/.test(password)) return 'Please choose a password with more variety.';
   return null;
 }
+
+/**
+ * Failed-attempt tracker for sign-in. Keyed on (client IP + email), counts only failures and is cleared on
+ * success, so a stranger spamming someone's email can lock out only their own IP, never the real owner.
+ */
+export function createFailureGuard(opts: { windowMs: number; max: number }) {
+  const entries = new Map<string, Bucket>();
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    for (const [k, b] of entries) if (b.resetAt <= now) entries.delete(k);
+  }, 60_000);
+  sweep.unref();
+  const live = (key: string) => {
+    const b = entries.get(key);
+    return b && b.resetAt > Date.now() ? b : undefined;
+  };
+  return {
+    /** Seconds until retry is allowed, or 0 if not blocked. */
+    blockedFor(key: string): number {
+      const b = live(key);
+      return b && b.count >= opts.max ? Math.ceil((b.resetAt - Date.now()) / 1000) : 0;
+    },
+    fail(key: string) {
+      const b = live(key) ?? { count: 0, resetAt: Date.now() + opts.windowMs };
+      b.count += 1;
+      entries.set(key, b);
+    },
+    clear(key: string) {
+      entries.delete(key);
+    },
+  };
+}
