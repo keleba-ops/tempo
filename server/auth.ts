@@ -86,6 +86,11 @@ export function createSession(db: DatabaseSync, userId: string): string {
     expiresAt,
     nowIso(),
   );
+  // Keep only the 10 most recent sessions per user and drop anything expired.
+  db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(nowIso());
+  db.prepare(
+    'DELETE FROM sessions WHERE user_id = ? AND id NOT IN (SELECT id FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10)',
+  ).run(userId, userId);
   return token;
 }
 

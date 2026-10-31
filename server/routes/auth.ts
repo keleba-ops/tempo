@@ -17,6 +17,16 @@ import { getParam, parseBody } from '../http.js';
 import { notifyUser } from '../notifications.js';
 import { getBusinessRowBySlug } from '../serializers.js';
 import { ApiError, nowIso, slugify, uid } from '../utils.js';
+import { rateLimit, weakPasswordReason } from '../security.js';
+
+// Burns the same time as a real check so unknown emails can't be told apart by response speed.
+const DUMMY_HASH = hashPassword('not-a-real-password');
+const perEmailLogin = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 8,
+  message: 'Too many sign-in attempts for this account. Please wait a few minutes or try again later.',
+  key: (req) => String(req.body?.email ?? '').trim().toLowerCase().slice(0, 160) || undefined,
+});
 
 const registerSchema = z.object({
   name: z.string().trim().min(2, 'Please enter your full name.').max(80),
@@ -72,6 +82,8 @@ export function authRouter(db: DatabaseSync): Router {
     if (input.role === 'owner' && !input.businessName?.trim()) {
       throw new ApiError(400, 'Please add your business name to create an owner account.');
     }
+    const weak = weakPasswordReason(input.password, input.email);
+    if (weak) throw new ApiError(400, weak);
     if (findUserByEmail(db, input.email)) {
       throw new ApiError(409, 'An account with that email already exists. Try signing in instead.');
     }
@@ -128,10 +140,11 @@ export function authRouter(db: DatabaseSync): Router {
     res.status(201).json({ user: mapUser(row), token });
   });
 
-  router.post('/auth/login', (req, res) => {
+  router.post('/auth/login', perEmailLogin, (req, res) => {
     const input = parseBody(loginSchema, req.body);
     const row = findUserByEmail(db, input.email);
-    if (!row || !verifyPassword(input.password, row.password_hash)) {
+    const ok = verifyPassword(input.password, row ? row.password_hash : DUMMY_HASH);
+    if (!row || !ok) {
       throw new ApiError(401, 'That email and password do not match. Please try again.');
     }
     const token = createSession(db, row.id);

@@ -8,6 +8,7 @@ import { attachUser } from './auth.js';
 import { db } from './db.js';
 import { sendDueReminders } from './booking-service.js';
 import { ApiError } from './utils.js';
+import { rateLimit, securityHeaders } from './security.js';
 import { seedDatabase } from './seed.js';
 import { authRouter } from './routes/auth.js';
 import { publicRouter } from './routes/public.js';
@@ -23,6 +24,8 @@ const port = Number(process.env.PORT || 4200);
 const isProd = process.env.NODE_ENV === 'production';
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1); // Railway sits in front; needed so rate limits see the real client IP
+app.use(securityHeaders(isProd));
 // Cross-origin PWA (GitHub Pages) -> this API. Set CORS_ORIGIN to the Pages origin, e.g. https://keleba-ops.github.io
 const corsOrigin = process.env.CORS_ORIGIN;
 if (corsOrigin) {
@@ -38,7 +41,12 @@ if (corsOrigin) {
     next();
   });
 }
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '100kb' }));
+app.use('/api', rateLimit({ windowMs: 60_000, max: 300, message: 'Too many requests. Please slow down and try again shortly.' }));
+app.use(
+  ['/api/auth/login', '/api/auth/register'],
+  rateLimit({ windowMs: 15 * 60_000, max: 20, message: 'Too many attempts. Please wait a few minutes and try again.' }),
+);
 app.use(cookieParser());
 app.use(attachUser(db));
 
