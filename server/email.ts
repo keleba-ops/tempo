@@ -129,11 +129,14 @@ export async function deliverEmail(
       if (process.env.BREVO_API_KEY) await sendViaBrevo(opts.to, opts.subject, html, text);
       else await transport!.sendMail({ from: FROM, to: opts.to, subject: opts.subject, html, text });
       status = 'sent';
-      console.log(`[tempo] email '${opts.kind}' sent`);
+      console.log(`[tempo] email '${opts.kind}' sent (id=${id})`);
     } catch (err) {
       status = 'failed';
       error = err instanceof Error ? err.message : 'Unknown delivery error';
-      console.error(`[tempo] email '${opts.kind}' failed: ${error}`);
+      // Logs carry no recipient data: just the outbox id, an error code and a sanitized, truncated reason.
+      const code = (err as { code?: string })?.code ?? 'unknown';
+      const reason = error.replace(/[^\s"'<>]+@[^\s"'<>]+/g, '[email]').slice(0, 80);
+      console.error(`[tempo] email '${opts.kind}' failed (id=${id}, code=${code}): ${reason}`);
     }
   } else {
     try {
