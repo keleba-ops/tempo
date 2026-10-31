@@ -21,7 +21,10 @@ import { createFailureGuard, weakPasswordReason } from '../security.js';
 
 // Burns the same time as a real check so unknown emails can't be told apart by response speed.
 const DUMMY_HASH = hashPassword('not-a-real-password');
-const loginFailures = createFailureGuard({ windowMs: 15 * 60_000, max: 8 });
+const loginFailures = createFailureGuard({ windowMs: 15 * 60_000, max: 8 }); // per device + email
+// Account-wide ceiling across all IPs: slows distributed guessing while staying high enough that a
+// stranger can't realistically keep the real owner locked out (it expires after an hour).
+const accountFailures = createFailureGuard({ windowMs: 60 * 60_000, max: 50 });
 
 const registerSchema = z.object({
   name: z.string().trim().min(2, 'Please enter your full name.').max(80),
@@ -138,18 +141,21 @@ export function authRouter(db: DatabaseSync): Router {
   router.post('/auth/login', (req, res) => {
     const input = parseBody(loginSchema, req.body);
     const row = findUserByEmail(db, input.email);
-    const guardKey = `${req.ip}|${input.email.trim().toLowerCase()}`;
-    const wait = loginFailures.blockedFor(guardKey);
+    const accountKey = input.email.trim().toLowerCase();
+    const guardKey = `${req.ip}|${accountKey}`;
+    const wait = Math.max(loginFailures.blockedFor(guardKey), accountFailures.blockedFor(accountKey));
     if (wait > 0) {
       res.setHeader('Retry-After', String(wait));
-      throw new ApiError(429, 'Too many failed sign-in attempts from this device. Please wait a few minutes and try again.');
+      throw new ApiError(429, 'Too many failed sign-in attempts. Please wait a few minutes and try again.');
     }
     const ok = verifyPassword(input.password, row ? row.password_hash : DUMMY_HASH);
     if (!row || !ok) {
       loginFailures.fail(guardKey);
+      accountFailures.fail(accountKey);
       throw new ApiError(401, 'That email and password do not match. Please try again.');
     }
     loginFailures.clear(guardKey);
+    accountFailures.clear(accountKey);
     const token = createSession(db, row.id);
     setSessionCookie(res, token);
     res.json({ user: mapUser(row), token });
