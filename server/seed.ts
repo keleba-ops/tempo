@@ -1,10 +1,14 @@
+import crypto from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { DateTime } from 'luxon';
 import { hashPassword } from './auth.js';
 import { notifyUser } from './notifications.js';
 import { nowIso, uid } from './utils.js';
 
-export const DEMO_PASSWORD = 'demo1234';
+// Local dev keeps the documented demo password. In production the seeded sample accounts get a random
+// password (or DEMO_PASSWORD if you set one), so the public trial can't be signed into with a known login.
+export const DEMO_PASSWORD =
+  process.env.DEMO_PASSWORD || (process.env.NODE_ENV === 'production' ? crypto.randomBytes(18).toString('base64url') : 'demo1234');
 
 interface SeedUser {
   id: string;

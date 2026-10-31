@@ -114,8 +114,10 @@ app.use((err: Error & { status?: number; type?: string }, req: Request, res: Res
 
 server.listen(port, () => {
   console.log(`\n  Tempo is running at http://localhost:${port}`);
-  console.log('  Customer demo: alex@tempo.demo / demo1234');
-  console.log('  Owner demo:    maya@tempo.demo / demo1234\n');
+  if (!isProd) {
+    console.log('  Customer demo: alex@tempo.demo / demo1234');
+    console.log('  Owner demo:    maya@tempo.demo / demo1234\n');
+  }
 
   setTimeout(() => {
     sendDueReminders(db)

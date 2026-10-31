@@ -9,6 +9,7 @@ import { Avatar } from '../components/Avatar';
 import { Spinner } from '../components/Loading';
 import { asset } from '../lib/asset';
 
+const SHOW_DEMOS = import.meta.env.DEV || import.meta.env.VITE_DEMO_LOGIN === '1';
 const DEMOS = {
   customer: { email: 'tebogo@tempo.demo', password: 'demo1234', name: 'Tebogo Motaung' },
   owner: { email: 'kagiso@tempo.demo', password: 'demo1234', name: 'Kagiso Mothibi' },
@@ -152,6 +153,8 @@ export function Login() {
             </button>
           </form>
 
+          {SHOW_DEMOS && (
+            <>
           <div className="auth-divider"><span>or step into a demo</span></div>
           <div className="demo-accounts">
             <button className="demo-card" onClick={() => demoLogin('customer')} disabled={Boolean(demoLoading)}>
@@ -174,6 +177,8 @@ export function Login() {
           <p className="demo-note">
             <ShieldCheck size={13} /> Demo accounts are pre-filled with bookings, favorites, and a full calendar.
           </p>
+            </>
+          )}
 
           <div className="auth-bottom-links">
             <Link to={`/register?role=owner${returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ''}`}>
