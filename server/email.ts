@@ -7,6 +7,23 @@ import { escapeHtml, nowIso, uid } from './utils.js';
 const APP_URL = (process.env.APP_URL || 'http://localhost:4200').replace(/\/$/, '');
 const FROM = process.env.SMTP_FROM || 'Tempo <hello@tempo.local>';
 
+/** Splits "Name <addr@x.com>" into parts for API providers. */
+function parseFrom(value: string): { name: string; email: string } {
+  const m = value.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  return m ? { name: m[1].trim() || 'Tempo', email: m[2].trim() } : { name: 'Tempo', email: value.trim() };
+}
+
+/** HTTPS delivery via Brevo. Used when BREVO_API_KEY is set (hosts like Railway block outbound SMTP). */
+async function sendViaBrevo(to: string, subject: string, html: string, text: string): Promise<void> {
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: { 'api-key': process.env.BREVO_API_KEY!, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ sender: parseFrom(FROM), to: [{ email: to }], subject, htmlContent: html, textContent: text }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`Brevo ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
 let transporter: Transporter | null = null;
 let transporterChecked = false;
 
@@ -106,10 +123,11 @@ export async function deliverEmail(
   let status = 'logged';
   let error: string | null = null;
 
-  const transport = getTransporter();
-  if (transport) {
+  const transport = process.env.BREVO_API_KEY ? null : getTransporter();
+  if (process.env.BREVO_API_KEY || transport) {
     try {
-      await transport.sendMail({ from: FROM, to: opts.to, subject: opts.subject, html, text });
+      if (process.env.BREVO_API_KEY) await sendViaBrevo(opts.to, opts.subject, html, text);
+      else await transport!.sendMail({ from: FROM, to: opts.to, subject: opts.subject, html, text });
       status = 'sent';
       console.log(`[tempo] email '${opts.kind}' sent`);
     } catch (err) {
