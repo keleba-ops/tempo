@@ -15,6 +15,18 @@ const TOKEN_KEY = 'tempo-token';
 function getToken(): string | null {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
+function deviceId(): string {
+  try {
+    let id = localStorage.getItem('tempo-device');
+    if (!id) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('tempo-device', id);
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
 function setToken(token: string | null) {
   try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
@@ -31,6 +43,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     ...options,
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(path === '/auth/login' && deviceId() ? { 'X-Device-Id': deviceId() } : {}),
       ...(API_BASE && getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
       ...(options.headers || {}),
     },

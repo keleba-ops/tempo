@@ -25,16 +25,23 @@ const loginFailures = createFailureGuard({ windowMs: 15 * 60_000, max: 8 }); // 
 // Account-wide ceiling across all IPs: slows distributed guessing while staying high enough that a
 // stranger can't realistically keep the real owner locked out (it expires after an hour).
 const accountFailures = createFailureGuard({ windowMs: 60 * 60_000, max: 50 });
-// IPs that have signed in successfully to an account. The account-wide ceiling never applies to these, so
-// the real owner's usual device can't be locked out by strangers guessing from elsewhere (in-memory; resets on restart).
-const knownIps = new Map<string, Set<string>>();
-function rememberIp(account: string, ip: string) {
-  const set = knownIps.get(account) ?? new Set<string>();
-  set.add(ip);
+// Random per-browser device IDs (sent as X-Device-Id) that have signed in successfully to an account. The
+// account-wide ceiling never applies to these, so the owner's own browser can't be locked out by strangers
+// guessing elsewhere, and a stranger can't claim the exemption without holding that secret ID. In-memory.
+const knownDevices = new Map<string, Set<string>>();
+function deviceId(req: { headers: Record<string, string | string[] | undefined> }): string | null {
+  const raw = req.headers['x-device-id'];
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  return /^[a-f0-9]{32,64}$/.test(id) ? id : null;
+}
+function rememberDevice(account: string, id: string | null) {
+  if (!id) return;
+  const set = knownDevices.get(account) ?? new Set<string>();
+  set.add(id);
   if (set.size > 10) set.delete(set.values().next().value as string);
-  knownIps.delete(account);
-  knownIps.set(account, set); // keeps Map insertion order ~ recency
-  if (knownIps.size > 5000) knownIps.delete(knownIps.keys().next().value as string);
+  knownDevices.delete(account);
+  knownDevices.set(account, set);
+  if (knownDevices.size > 5000) knownDevices.delete(knownDevices.keys().next().value as string);
 }
 
 const registerSchema = z.object({
@@ -154,7 +161,8 @@ export function authRouter(db: DatabaseSync): Router {
     const row = findUserByEmail(db, input.email);
     const accountKey = input.email.trim().toLowerCase();
     const guardKey = `${req.ip}|${accountKey}`;
-    const accountWait = knownIps.get(accountKey)?.has(req.ip ?? '') ? 0 : accountFailures.blockedFor(accountKey);
+    const device = deviceId(req);
+    const accountWait = device && knownDevices.get(accountKey)?.has(device) ? 0 : accountFailures.blockedFor(accountKey);
     const wait = Math.max(loginFailures.blockedFor(guardKey), accountWait);
     if (wait > 0) {
       res.setHeader('Retry-After', String(wait));
@@ -168,7 +176,7 @@ export function authRouter(db: DatabaseSync): Router {
     }
     loginFailures.clear(guardKey);
     accountFailures.clear(accountKey);
-    rememberIp(accountKey, req.ip ?? '');
+    rememberDevice(accountKey, device);
     const token = createSession(db, row.id);
     setSessionCookie(res, token);
     res.json({ user: mapUser(row), token });
