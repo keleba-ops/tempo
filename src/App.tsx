@@ -13,6 +13,8 @@ import { Register } from './pages/Register';
 import { NotFound } from './pages/NotFound';
 import { GetApp } from './pages/GetApp';
 import { InstallPrompt } from './components/InstallPrompt';
+import { AuthGate } from './components/AuthGate';
+import { WelcomeWizard } from './components/WelcomeWizard';
 import { AccountOverview } from './pages/account/AccountOverview';
 import { AccountBookings } from './pages/account/AccountBookings';
 import { AccountFavorites } from './pages/account/AccountFavorites';
@@ -122,6 +124,8 @@ export default function App() {
         <Route path="/dashboard" element={<HomeRedirect />} />
         <Route path="/home" element={<Navigate to="/" replace />} />
       </Routes>
+      <AuthGate />
+      <WelcomeWizard />
       <InstallPrompt />
     </>
   );
