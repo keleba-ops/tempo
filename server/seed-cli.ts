@@ -8,5 +8,5 @@ if (reset) {
 }
 await seedDatabase(db);
 console.log('Seeded Tempo demo data.');
-console.log('Customer: tebogo@tempo.demo / demo1234');
-console.log('Owner:    kagiso@tempo.demo / demo1234');
+console.log('Customer: tebogo@tempo.demo / PIN 482915');
+console.log('Owner:    kagiso@tempo.demo / PIN 482915');

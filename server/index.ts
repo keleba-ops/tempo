@@ -44,20 +44,11 @@ if (corsOrigin) {
 app.use(express.json({ limit: '100kb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, max: 300, message: 'Too many requests. Please slow down and try again shortly.' }));
 app.use(
-  ['/api/auth/login', '/api/auth/register'],
-  rateLimit({ windowMs: 15 * 60_000, max: 20, message: 'Too many attempts. Please wait a few minutes and try again.' }),
+  ['/api/auth/login', '/api/auth/register', '/api/auth/recover', '/api/auth/change-pin'],
+  rateLimit({ windowMs: 15 * 60_000, max: 40, message: 'Too many attempts. Please wait a few minutes and try again.' }),
 );
 app.use(cookieParser());
 app.use(attachUser(db));
-// Accounts holding a temporary password can do nothing else until they set their own.
-app.use('/api', (req, res, next) => {
-  if (!req.user?.mustChangePassword) return next();
-  const allowed =
-    (req.method === 'POST' && (req.path === '/auth/change-password' || req.path === '/auth/logout')) ||
-    (req.path === '/me' && (req.method === 'GET' || req.method === 'PATCH'));
-  if (allowed) return next();
-  res.status(403).json({ error: 'Please set your own password to continue.', code: 'PASSWORD_CHANGE_REQUIRED' });
-});
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, app: 'tempo', time: new Date().toISOString() });
@@ -132,8 +123,8 @@ app.use((err: Error & { status?: number; type?: string }, req: Request, res: Res
 server.listen(port, () => {
   console.log(`\n  Tempo is running at http://localhost:${port}`);
   if (!isProd) {
-    console.log('  Customer demo: alex@tempo.demo / demo1234');
-    console.log('  Owner demo:    maya@tempo.demo / demo1234\n');
+    console.log('  Customer demo: alex@tempo.demo / PIN 482915');
+    console.log('  Owner demo:    maya@tempo.demo / PIN 482915\n');
   }
 
   setTimeout(() => {

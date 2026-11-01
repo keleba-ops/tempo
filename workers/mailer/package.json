@@ -1,0 +1,6 @@
+{
+  "name": "tempo-mailer",
+  "private": true,
+  "type": "module",
+  "dependencies": { "worker-mailer": "^1.3.0" }
+}
