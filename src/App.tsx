@@ -8,8 +8,6 @@ import { PageLoader } from './components/Loading';
 import { Landing } from './pages/Landing';
 import { Explore } from './pages/Explore';
 import { BusinessProfile } from './pages/BusinessProfile';
-import { Login } from './pages/Login';
-import { Register } from './pages/Register';
 import { NotFound } from './pages/NotFound';
 import { GetApp } from './pages/GetApp';
 import { InstallPrompt } from './components/InstallPrompt';
@@ -89,14 +87,13 @@ export default function App() {
       <Routes>
         <Route element={<PublicLayout />}>
           <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Landing />} />
+          <Route path="/register" element={<Landing />} />
           <Route path="/explore" element={<Explore />} />
           <Route path="/b/:slug" element={<BusinessProfile />} />
           <Route path="/get-app" element={<GetApp />} />
           <Route path="*" element={<NotFound />} />
         </Route>
-
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
 
         <Route element={<RequireAuth role="customer" />}>
           <Route element={<DashboardLayout variant="customer" />}>

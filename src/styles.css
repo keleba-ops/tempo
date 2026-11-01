@@ -13263,3 +13263,8 @@ h4 {
 .gate select.input { appearance: auto; }
 .gate-link { border: 0; background: none; color: var(--muted); font: 500 13px var(--sans); text-decoration: underline; cursor: pointer; justify-self: center; }
 .near-chip { border-style: dashed; }
+.pin-input { letter-spacing: 0.35em; font-variant-numeric: tabular-nums; text-align: center; font-size: 18px; }
+.pin-card { display: grid; gap: 10px; }
+.pin-card h3 { display: flex; align-items: center; gap: 6px; margin: 0; }
+.pin-card .pin-input { width: 100%; box-sizing: border-box; }
+.gate-link:disabled { opacity: 0.55; cursor: default; text-decoration: none; }

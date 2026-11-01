@@ -2,15 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { Role, User } from '../../shared/types';
 import { get, patch, post, setUnauthorizedHandler } from '../lib/api';
 
-interface LoginInput {
-  email: string;
-  password: string;
-}
-
-interface RegisterInput {
+interface RegisterStartInput {
   name: string;
   email: string;
-  password?: string;
   role: Role;
   businessName?: string;
   timezone?: string;
@@ -19,10 +13,12 @@ interface RegisterInput {
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (input: LoginInput) => Promise<User>;
-  register: (input: RegisterInput) => Promise<User>;
-  temporaryPassword: string | null;
-  changePassword: (currentPassword: string, newPassword: string) => Promise<User>;
+  login: (input: { email: string; pin: string }) => Promise<User>;
+  startRegister: (input: RegisterStartInput) => Promise<void>;
+  verifyRegister: (input: { email: string; code: string; pin: string }) => Promise<User>;
+  startRecover: (email: string) => Promise<void>;
+  verifyRecover: (input: { email: string; code: string; pin: string }) => Promise<User>;
+  changePin: (currentPin: string, newPin: string) => Promise<User>;
   logout: () => Promise<void>;
   refresh: () => Promise<User | null>;
   updateUser: (patch: Partial<User>) => void;
@@ -57,26 +53,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [refresh]);
 
-  const login = useCallback(async (input: LoginInput) => {
+  const login = useCallback(async (input: { email: string; pin: string }) => {
     const data = await post<{ user: User }>('/auth/login', input);
     setUser(data.user);
     return data.user;
   }, []);
 
-  const register = useCallback(async (input: RegisterInput) => {
-    const data = await post<{ user: User; temporaryPassword?: string }>('/auth/register', input);
-    if (data.temporaryPassword) {
-      setTemporaryPassword(data.temporaryPassword);
-      try { sessionStorage.setItem('tempo-temp-pw', data.temporaryPassword); } catch { /* ignore */ }
-    }
+  const startRegister = useCallback(async (input: RegisterStartInput) => {
+    await post('/auth/register/start', input);
+  }, []);
+
+  const verifyRegister = useCallback(async (input: { email: string; code: string; pin: string }) => {
+    const data = await post<{ user: User }>('/auth/register/verify', input);
     setUser(data.user);
     return data.user;
   }, []);
 
-  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
-    const data = await post<{ user: User }>('/auth/change-password', { currentPassword, newPassword });
-    setTemporaryPassword(null);
-    try { sessionStorage.removeItem('tempo-temp-pw'); } catch { /* ignore */ }
+  const startRecover = useCallback(async (email: string) => {
+    await post('/auth/recover/start', { email });
+  }, []);
+
+  const verifyRecover = useCallback(async (input: { email: string; code: string; pin: string }) => {
+    const data = await post<{ user: User }>('/auth/recover/verify', input);
+    setUser(data.user);
+    return data.user;
+  }, []);
+
+  const changePin = useCallback(async (currentPin: string, newPin: string) => {
+    const data = await post<{ user: User }>('/auth/change-pin', { currentPin, newPin });
     setUser(data.user);
     return data.user;
   }, []);
@@ -86,8 +90,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await post('/auth/logout');
     } finally {
       setUser(null);
-      setTemporaryPassword(null);
-      try { sessionStorage.removeItem('tempo-temp-pw'); } catch { /* ignore */ }
     }
   }, []);
 
@@ -96,8 +98,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, login, register, temporaryPassword, changePassword, logout, refresh, updateUser }),
-    [user, loading, login, register, temporaryPassword, changePassword, logout, refresh, updateUser],
+    () => ({ user, loading, login, startRegister, verifyRegister, startRecover, verifyRecover, changePin, logout, refresh, updateUser }),
+    [user, loading, login, startRegister, verifyRegister, startRecover, verifyRecover, changePin, logout, refresh, updateUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

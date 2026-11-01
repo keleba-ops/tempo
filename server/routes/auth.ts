@@ -6,28 +6,28 @@ import {
   createSession,
   destroyOtherSessions,
   destroySession,
-  generateTemporaryPassword,
   findUserByEmail,
   findUserById,
   hashPassword,
   mapUser,
   requireAuth,
   setSessionCookie,
-  verifyPassword,
 } from '../auth.js';
 import { getParam, parseBody } from '../http.js';
 import { notifyUser } from '../notifications.js';
 import { getBusinessRowBySlug } from '../serializers.js';
 import { ApiError, nowIso, slugify, uid } from '../utils.js';
 import { deliverEmail } from '../email.js';
-import { createFailureGuard, weakPasswordReason } from '../security.js';
+import crypto from 'node:crypto';
+import { createFailureGuard, rateLimit } from '../security.js';
+import { generateCode, hashCode, hashPin, isWeakPin, verifyPin } from '../pin.js';
 
 // Burns the same time as a real check so unknown emails can't be told apart by response speed.
-const DUMMY_HASH = hashPassword('not-a-real-password');
+const DUMMY_HASH = hashPin('000000');
 const loginFailures = createFailureGuard({ windowMs: 15 * 60_000, max: 8 }); // per device + email
 // Account-wide ceiling across all IPs: slows distributed guessing while staying high enough that a
 // stranger can't realistically keep the real owner locked out (it expires after an hour).
-const accountFailures = createFailureGuard({ windowMs: 60 * 60_000, max: 50 });
+const accountFailures = createFailureGuard({ windowMs: 60 * 60_000, max: 30 });
 // Random per-browser device IDs (sent as X-Device-Id) that have signed in successfully to an account. The
 // account-wide ceiling never applies to these, so the owner's own browser can't be locked out by strangers
 // guessing elsewhere, and a stranger can't claim the exemption without holding that secret ID. In-memory.
@@ -47,24 +47,27 @@ function rememberDevice(account: string, id: string | null) {
   if (knownDevices.size > 5000) knownDevices.delete(knownDevices.keys().next().value as string);
 }
 
-const registerSchema = z.object({
+const pinField = z.string().regex(/^\d{6}$/, 'Your PIN must be exactly 6 digits.');
+const codeField = z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code from your email.');
+const emailField = z.string().trim().email('Please enter a valid email address.').max(160);
+
+const registerStartSchema = z.object({
   name: z.string().trim().min(2, 'Please enter your full name.').max(80),
-  email: z.string().trim().email('Please enter a valid email address.').max(160),
-  password: z.string().min(8, 'Your password needs at least 8 characters.').max(200).optional(),
+  email: emailField,
   role: z.enum(['owner', 'customer']),
   businessName: z.string().trim().max(100).optional(),
   timezone: z.string().trim().max(80).optional(),
 });
+const registerVerifySchema = z.object({ email: emailField, code: codeField, pin: pinField });
+const recoverStartSchema = z.object({ email: emailField });
+const recoverVerifySchema = z.object({ email: emailField, code: codeField, pin: pinField });
 
 const loginSchema = z.object({
-  email: z.string().trim().email('Please enter a valid email address.'),
-  password: z.string().min(1, 'Please enter your password.'),
+  email: emailField,
+  pin: z.string().regex(/^\d{6}$/, 'Enter your 6-digit PIN.'),
 });
 
-const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, 'Please enter your current password.').max(200),
-  newPassword: z.string().min(8, 'Your new password needs at least 8 characters.').max(200),
-});
+const changePinSchema = z.object({ currentPin: pinField, newPin: pinField });
 
 const profileSchema = z.object({
   name: z.string().trim().min(2, 'Please enter your name.').max(80).optional(),
@@ -103,52 +106,114 @@ function validTimezone(zone: string): boolean {
 export function authRouter(db: DatabaseSync): Router {
   const router = Router();
 
-  router.post('/auth/register', async (req, res) => {
-    const input = parseBody(registerSchema, req.body);
+  const isProd = process.env.NODE_ENV === 'production';
+  const emailKey = (req: { body?: { email?: unknown } }) => String(req.body?.email ?? '').trim().toLowerCase().slice(0, 160);
+  // Per (device + email): 1 code a minute, 5 an hour. Per email overall: 15 an hour, so nobody can flood an inbox.
+  const startMinute = rateLimit({ windowMs: 60_000, max: 1, message: 'Please wait a minute before requesting another code.', key: (req) => `${req.ip}|${emailKey(req)}` });
+  const startHour = rateLimit({ windowMs: 3_600_000, max: 5, message: 'Too many codes requested. Please try again in an hour.', key: (req) => `${req.ip}|${emailKey(req)}` });
+  const startEmail = rateLimit({ windowMs: 3_600_000, max: 15, message: 'Too many codes requested for this email. Please try again later.', key: emailKey });
+
+  /** Emails a fresh 6-digit code (older ones for the same purpose stop working). Returns false if it could not be delivered. */
+  async function issueCode(email: string, purpose: 'signup' | 'recover', payload: string, userId: string | null, name: string | null): Promise<boolean> {
+    const ts = nowIso();
+    db.prepare('UPDATE email_codes SET consumed_at = ? WHERE email = ? AND purpose = ? AND consumed_at IS NULL').run(ts, email, purpose);
+    const code = generateCode();
+    const id = uid();
+    db.prepare(
+      'INSERT INTO email_codes (id, email, purpose, code_hash, payload, attempts, expires_at, created_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+    ).run(id, email, purpose, hashCode(email, code), payload, new Date(Date.now() + 10 * 60_000).toISOString(), ts);
+    const status = await deliverEmail(db, {
+      userId,
+      to: email,
+      subject: 'Your Tempo verification code',
+      kind: `${purpose}_code`,
+      redact: [code],
+      content: {
+        kicker: purpose === 'signup' ? 'Welcome to Tempo' : 'Reset your PIN',
+        heading: name ? `Hi ${name.split(' ')[0]}, here is your code` : 'Here is your code',
+        intro: purpose === 'signup'
+          ? 'Enter this code in Tempo to verify your email and choose your 6-digit PIN. It expires in 10 minutes.'
+          : 'Enter this code in Tempo to choose a new 6-digit PIN. It expires in 10 minutes.',
+        details: [{ label: 'Verification code', value: code }],
+        footnote: 'If you did not request this, you can ignore this email. Never share this code with anyone.',
+      },
+    });
+    // Outside production the code is logged to a preview file, which is enough for development.
+    const delivered = status === 'sent' || (!isProd && status === 'logged');
+    if (!delivered) db.prepare('UPDATE email_codes SET consumed_at = ? WHERE id = ?').run(nowIso(), id);
+    return delivered;
+  }
+
+  /** Checks an emailed code. Wrong guesses are counted against the code, which dies after 5 tries. Returns its payload. */
+  function consumeCode(email: string, purpose: 'signup' | 'recover', code: string): string {
+    const row = db
+      .prepare(
+        `SELECT id, code_hash, payload, attempts FROM email_codes
+         WHERE email = ? AND purpose = ? AND consumed_at IS NULL AND expires_at > ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(email, purpose, nowIso()) as { id: string; code_hash: string; payload: string; attempts: number } | undefined;
+    if (!row) throw new ApiError(400, 'That code has expired or was never requested. Please request a new one.');
+    if (row.attempts >= 5) throw new ApiError(429, 'Too many wrong codes. Please request a new code.');
+    const expected = Buffer.from(row.code_hash, 'hex');
+    const given = Buffer.from(hashCode(email, code), 'hex');
+    if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
+      db.prepare('UPDATE email_codes SET attempts = attempts + 1 WHERE id = ?').run(row.id);
+      throw new ApiError(400, 'That code is not right. Please check it and try again.');
+    }
+    db.prepare('UPDATE email_codes SET consumed_at = ? WHERE id = ?').run(nowIso(), row.id);
+    return row.payload;
+  }
+
+  router.post('/auth/register/start', startMinute, startHour, startEmail, async (req, res) => {
+    const input = parseBody(registerStartSchema, req.body);
     if (input.role === 'owner' && !input.businessName?.trim()) {
       throw new ApiError(400, 'Please add your business name to create an owner account.');
     }
-    // No password supplied -> we issue a one-time temporary password and require a change on first sign-in.
-    const temporaryPassword = input.password ? null : generateTemporaryPassword();
-    const initialPassword = input.password ?? temporaryPassword!;
-    if (input.password) {
-      const weak = weakPasswordReason(input.password, input.email);
-      if (weak) throw new ApiError(400, weak);
+    const email = input.email.trim().toLowerCase();
+    if (findUserByEmail(db, email)) {
+      throw new ApiError(409, 'An account with that email already exists. Try signing in instead.');
     }
-    if (findUserByEmail(db, input.email)) {
+    const payload = JSON.stringify({
+      name: input.name.trim(),
+      role: input.role,
+      businessName: input.businessName?.trim() ?? '',
+      timezone: input.timezone && validTimezone(input.timezone) ? input.timezone : 'Africa/Gaborone',
+    });
+    if (!(await issueCode(email, 'signup', payload, null, input.name.trim()))) {
+      throw new ApiError(503, 'We could not send your code right now. Please try again in a few minutes.');
+    }
+    res.json({ ok: true });
+  });
+
+  router.post('/auth/register/verify', (req, res) => {
+    const input = parseBody(registerVerifySchema, req.body);
+    const email = input.email.trim().toLowerCase();
+    if (isWeakPin(input.pin)) throw new ApiError(422, 'Choose a PIN that is not easy to guess (not 123456, 111111 and so on).');
+    const data = JSON.parse(consumeCode(email, 'signup', input.code)) as {
+      name: string; role: 'owner' | 'customer'; businessName: string; timezone: string;
+    };
+    if (findUserByEmail(db, email)) {
       throw new ApiError(409, 'An account with that email already exists. Try signing in instead.');
     }
 
     const userId = uid();
-    const passwordHash = hashPassword(initialPassword);
     const timestamp = nowIso();
-    const timezone = input.timezone && validTimezone(input.timezone) ? input.timezone : 'Africa/Gaborone';
-
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare(
         `INSERT INTO users (id, name, email, password_hash, role, email_notifications, in_app_notifications, created_at, must_change_password)
-         VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)`,
-      ).run(userId, input.name.trim(), input.email.trim().toLowerCase(), passwordHash, input.role, timestamp, temporaryPassword ? 1 : 0);
+         VALUES (?, ?, ?, ?, ?, 1, 1, ?, 0)`,
+      ).run(userId, data.name, email, hashPin(input.pin), data.role, timestamp);
 
-      if (input.role === 'owner') {
+      if (data.role === 'owner') {
         const businessId = uid();
-        const name = input.businessName!.trim();
         db.prepare(
           `INSERT INTO businesses
             (id, owner_id, name, slug, category, tagline, description, address, city, country, phone, email, timezone,
              cover_image, accent_color, approval_required, rating, review_count, created_at)
            VALUES (?, ?, ?, ?, 'Services', 'A new place to book time.', '', '', '', 'Botswana', '', ?, ?, '/images/studio.jpg', '#b65b3d', 0, 5.0, 0, ?)`,
-        ).run(
-          businessId,
-          userId,
-          name,
-          uniqueSlug(db, name),
-          input.email.trim().toLowerCase(),
-          timezone,
-          timestamp,
-        );
-
+        ).run(businessId, userId, data.businessName, uniqueSlug(db, data.businessName), email, data.timezone, timestamp);
         for (let weekday = 1; weekday <= 5; weekday++) {
           db.prepare(
             'INSERT INTO availability_rules (id, business_id, weekday, start_minute, end_minute, is_active) VALUES (?, ?, ?, 540, 1020, 1)',
@@ -157,40 +222,41 @@ export function authRouter(db: DatabaseSync): Router {
       }
       db.exec('COMMIT');
     } catch (error) {
-      try {
-        db.exec('ROLLBACK');
-      } catch {
-        // no-op
-      }
+      try { db.exec('ROLLBACK'); } catch { /* no-op */ }
       throw error;
     }
 
     const token = createSession(db, userId);
     setSessionCookie(res, token);
-    const row = findUserById(db, userId)!;
-    if (temporaryPassword) {
-      // Fire-and-forget: a mail problem must never block sign-up (the password is also shown on screen once).
-      void deliverEmail(db, {
-        userId: row.id,
-        to: row.email,
-        subject: 'Your Tempo temporary password',
-        kind: 'temporary_password',
-        redact: [temporaryPassword],
-        content: {
-          kicker: 'Welcome to Tempo',
-          heading: `Hi ${row.name.split(' ')[0]}, your account is ready`,
-          intro: 'Use this temporary password to finish setting up. You will be asked to choose your own password the first time you sign in.',
-          details: [
-            { label: 'Email', value: row.email },
-            { label: 'Temporary password', value: temporaryPassword },
-          ],
-          ctaLabel: 'Open Tempo',
-          ctaUrl: '/',
-          footnote: 'If you did not create a Tempo account, you can ignore this email. The temporary password stops working once you set your own.',
-        },
-      }).catch(() => {});
+    res.status(201).json({ user: mapUser(findUserById(db, userId)!), token });
+  });
+
+  // Always answers "ok" so it can't be used to discover who has an account.
+  router.post('/auth/recover/start', startMinute, startHour, startEmail, async (req, res) => {
+    const input = parseBody(recoverStartSchema, req.body);
+    const email = input.email.trim().toLowerCase();
+    const row = findUserByEmail(db, email);
+    if (row) {
+      const ok = await issueCode(email, 'recover', '', row.id, row.name);
+      if (!ok) throw new ApiError(503, 'We could not send your code right now. Please try again in a few minutes.');
     }
-    res.status(201).json({ user: mapUser(row), token, ...(temporaryPassword ? { temporaryPassword } : {}) });
+    res.json({ ok: true });
+  });
+
+  router.post('/auth/recover/verify', (req, res) => {
+    const input = parseBody(recoverVerifySchema, req.body);
+    const email = input.email.trim().toLowerCase();
+    if (isWeakPin(input.pin)) throw new ApiError(422, 'Choose a PIN that is not easy to guess (not 123456, 111111 and so on).');
+    const row = findUserByEmail(db, email);
+    if (!row) throw new ApiError(400, 'That code has expired or was never requested. Please request a new one.');
+    consumeCode(email, 'recover', input.code);
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hashPin(input.pin), row.id);
+    destroyOtherSessions(db, row.id, undefined); // signs out every device
+    loginFailures.clear(`${req.ip}|${email}`);
+    accountFailures.clear(email);
+    const token = createSession(db, row.id);
+    setSessionCookie(res, token);
+    res.json({ user: mapUser(findUserById(db, row.id)!), token });
   });
 
   router.post('/auth/login', (req, res) => {
@@ -205,11 +271,11 @@ export function authRouter(db: DatabaseSync): Router {
       res.setHeader('Retry-After', String(wait));
       throw new ApiError(429, 'Too many failed sign-in attempts. Please wait a few minutes and try again.');
     }
-    const ok = verifyPassword(input.password, row ? row.password_hash : DUMMY_HASH);
+    const ok = verifyPin(input.pin, row ? row.password_hash : DUMMY_HASH);
     if (!row || !ok) {
       loginFailures.fail(guardKey);
       accountFailures.fail(accountKey);
-      throw new ApiError(401, 'That email and password do not match. Please try again.');
+      throw new ApiError(401, 'That email and PIN do not match. Please try again.');
     }
     loginFailures.clear(guardKey);
     accountFailures.clear(accountKey);
@@ -257,30 +323,24 @@ export function authRouter(db: DatabaseSync): Router {
     res.json({ user: mapUser(row) });
   });
 
-  router.post('/auth/change-password', requireAuth, (req, res) => {
-    const input = parseBody(changePasswordSchema, req.body);
+  router.post('/auth/change-pin', requireAuth, (req, res) => {
+    const input = parseBody(changePinSchema, req.body);
     const row = findUserById(db, req.user!.id)!;
-    const key = `chpw|${row.id}`;
+    const key = `chpin|${row.id}`;
     const wait = loginFailures.blockedFor(key);
     if (wait > 0) {
       res.setHeader('Retry-After', String(wait));
       throw new ApiError(429, 'Too many attempts. Please wait a few minutes and try again.');
     }
-    if (!verifyPassword(input.currentPassword, row.password_hash)) {
+    if (!verifyPin(input.currentPin, row.password_hash)) {
       loginFailures.fail(key);
-      throw new ApiError(400, 'Your current password is not correct.');
+      throw new ApiError(400, 'Your current PIN is not correct.');
     }
     loginFailures.clear(key);
-    if (input.newPassword === input.currentPassword) {
-      throw new ApiError(400, 'Please choose a new password that is different from your temporary one.');
-    }
-    const weak = weakPasswordReason(input.newPassword, row.email);
-    if (weak) throw new ApiError(400, weak);
-    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(
-      hashPassword(input.newPassword),
-      row.id,
-    );
-    destroyOtherSessions(db, row.id, req.sessionToken);
+    if (input.newPin === input.currentPin) throw new ApiError(422, 'Your new PIN must be different from the current one.');
+    if (isWeakPin(input.newPin)) throw new ApiError(422, 'Choose a PIN that is not easy to guess (not 123456, 111111 and so on).');
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPin(input.newPin), row.id);
+    destroyOtherSessions(db, row.id, req.sessionToken); // other devices are signed out
     res.json({ user: mapUser(findUserById(db, row.id)!) });
   });
 

@@ -179,6 +179,18 @@ CREATE TABLE IF NOT EXISTS email_outbox (
   error TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS email_codes (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL COLLATE NOCASE,
+  purpose TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_codes_lookup ON email_codes(email, purpose, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_email_outbox_user ON email_outbox(user_id, created_at DESC);
 `;
 

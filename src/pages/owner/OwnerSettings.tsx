@@ -22,6 +22,7 @@ import { CATEGORY_OPTIONS } from '../../lib/categories';
 import { TIMEZONES } from '../../lib/timezones';
 import { money } from '../../lib/format';
 import { asset } from '../../lib/asset';
+import { ChangePinCard } from '../../components/ChangePinCard';
 
 const COVER_OPTIONS = [
   { src: '/images/barber.jpg', label: 'Barbershop' },
@@ -399,6 +400,7 @@ export function OwnerSettings() {
             <Link to="/owner/services" className="btn btn-sm btn-outline btn-block">Manage services</Link>
             <Link to="/owner/availability" className="btn btn-sm btn-outline btn-block">Manage availability</Link>
           </div>
+          <ChangePinCard />
         </aside>
       </form>
     </div>

@@ -1,14 +1,14 @@
 import crypto from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { DateTime } from 'luxon';
-import { hashPassword } from './auth.js';
+import { hashPin } from './pin.js';
 import { notifyUser } from './notifications.js';
 import { nowIso, uid } from './utils.js';
 
-// Local dev keeps the documented demo password. In production the seeded sample accounts get a random
-// password (or DEMO_PASSWORD if you set one), so the public trial can't be signed into with a known login.
-export const DEMO_PASSWORD =
-  process.env.DEMO_PASSWORD || (process.env.NODE_ENV === 'production' ? crypto.randomBytes(18).toString('base64url') : 'demo1234');
+// Local dev keeps a documented demo PIN. In production the seeded sample accounts get a random PIN (or DEMO_PIN if you
+// set one), so the public trial can't be signed into with a known login.
+export const DEMO_PIN =
+  process.env.DEMO_PIN || (process.env.NODE_ENV === 'production' ? String(crypto.randomInt(100000, 1000000)) : '482915');
 
 interface SeedUser {
   id: string;
@@ -180,7 +180,7 @@ export function resetDatabase(db: DatabaseSync): void {
 export async function seedDatabase(db: DatabaseSync): Promise<void> {
   if (isSeeded(db)) return;
 
-  const passwordHash = hashPassword(DEMO_PASSWORD);
+  const passwordHash = hashPin(DEMO_PIN);
 
   const users: SeedUser[] = [
     { id: uid(), name: 'Kagiso Mothibi', email: 'kagiso@tempo.demo', role: 'owner', phone: '+267 71 234 567', address: 'Plot 123, Main Mall', city: 'Gaborone' },

@@ -8,6 +8,7 @@ import { Avatar } from '../../components/Avatar';
 import { Spinner } from '../../components/Loading';
 import { GoogleMap } from '../../components/GoogleMap';
 
+import { ChangePinCard } from '../../components/ChangePinCard';
 export function AccountSettings() {
   const { user, updateUser } = useAuth();
   const { toast } = useToast();
@@ -243,6 +244,7 @@ export function AccountSettings() {
             <h3>Security note</h3>
             <p>Your session is protected by an HTTP-only cookie and lasts up to 30 days. Sign out on shared devices.</p>
           </div>
+          <ChangePinCard />
           <div className="settings-support">
             <span>Need a hand?</span>
             <a href="mailto:hello@tempo.local">hello@tempo.local</a>
