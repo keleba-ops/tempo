@@ -3,9 +3,10 @@ import { hashPassword, verifyPassword } from './auth.js';
 
 // PINs are only 6 digits, so a stolen database copy could be brute-forced offline. The pepper (a server-side secret
 // kept out of the database) is mixed in before hashing, so the hashes are useless without it.
-const PEPPER = process.env.PIN_PEPPER || 'tempo-dev-pepper-change-me';
-if (process.env.NODE_ENV === 'production' && !process.env.PIN_PEPPER) {
-  console.warn('[tempo] PIN_PEPPER is not set: set it so stolen database copies cannot be brute-forced offline.');
+// Fails closed: in production there is no default, and a short secret is refused at startup.
+const PEPPER = process.env.PIN_PEPPER ?? (process.env.NODE_ENV === 'production' ? '' : 'tempo-dev-pepper-change-me');
+if (process.env.NODE_ENV === 'production' && PEPPER.length < 32) {
+  throw new Error('PIN_PEPPER must be set to a random secret of at least 32 characters in production.');
 }
 
 const pre = (pin: string) => crypto.createHmac('sha256', PEPPER).update(pin).digest('hex');

@@ -85,7 +85,7 @@ export function AuthGate() {
     }
     setStep('code');
     setCooldown(60);
-    setNotice(`We emailed a 6-digit code to ${email.trim()}. It expires in 10 minutes.`);
+    setNotice(`Check ${email.trim()} for an email from Tempo and enter the 6-digit code from it. It expires in 10 minutes.`);
   }
 
   async function submit(event: FormEvent) {

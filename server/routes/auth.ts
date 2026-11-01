@@ -171,8 +171,25 @@ export function authRouter(db: DatabaseSync): Router {
       throw new ApiError(400, 'Please add your business name to create an owner account.');
     }
     const email = input.email.trim().toLowerCase();
-    if (findUserByEmail(db, email)) {
-      throw new ApiError(409, 'An account with that email already exists. Try signing in instead.');
+    const existing = findUserByEmail(db, email);
+    if (existing) {
+      // Same answer as a new sign-up, so this can't be used to discover who has an account: the owner gets a notice instead of a code.
+      const status = await deliverEmail(db, {
+        userId: existing.id,
+        to: email,
+        subject: 'You already have a Tempo account',
+        kind: 'signup_existing',
+        content: {
+          kicker: 'Tempo',
+          heading: 'You already have an account',
+          intro: 'Someone (hopefully you) tried to create a Tempo account with this email. Sign in with your 6-digit PIN, or choose "Forgot your PIN?" in the sign-in window if you need a new one.',
+          footnote: 'If this was not you, you can ignore this email. Your account has not been changed.',
+        },
+      });
+      if (!(status === 'sent' || (!isProd && status === 'logged'))) {
+        throw new ApiError(503, 'We could not send your email right now. Please try again in a few minutes.');
+      }
+      return res.json({ ok: true });
     }
     const payload = JSON.stringify({
       name: input.name.trim(),
@@ -237,8 +254,9 @@ export function authRouter(db: DatabaseSync): Router {
     const email = input.email.trim().toLowerCase();
     const row = findUserByEmail(db, email);
     if (row) {
+      // Delivery failure is not reported either: a different answer here would reveal that the account exists.
       const ok = await issueCode(email, 'recover', '', row.id, row.name);
-      if (!ok) throw new ApiError(503, 'We could not send your code right now. Please try again in a few minutes.');
+      if (!ok) console.error('[tempo] recovery code could not be delivered');
     }
     res.json({ ok: true });
   });
