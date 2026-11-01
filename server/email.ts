@@ -24,6 +24,17 @@ async function sendViaBrevo(to: string, subject: string, html: string, text: str
   if (!res.ok) throw new Error(`Brevo ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
 
+/** HTTPS relay (a Cloudflare Worker that sends through Gmail). Used when MAILER_URL is set. */
+async function sendViaRelay(to: string, subject: string, html: string, text: string): Promise<void> {
+  const res = await fetch(process.env.MAILER_URL!, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${process.env.MAILER_SECRET ?? ''}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ to, subject, html, text }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`Relay ${res.status}`);
+}
+
 let transporter: Transporter | null = null;
 let transporterChecked = false;
 
@@ -123,10 +134,12 @@ export async function deliverEmail(
   let status = 'logged';
   let error: string | null = null;
 
-  const transport = process.env.BREVO_API_KEY ? null : getTransporter();
-  if (process.env.BREVO_API_KEY || transport) {
+  const useRelay = Boolean(process.env.MAILER_URL);
+  const transport = useRelay || process.env.BREVO_API_KEY ? null : getTransporter();
+  if (useRelay || process.env.BREVO_API_KEY || transport) {
     try {
-      if (process.env.BREVO_API_KEY) await sendViaBrevo(opts.to, opts.subject, html, text);
+      if (useRelay) await sendViaRelay(opts.to, opts.subject, html, text);
+      else if (process.env.BREVO_API_KEY) await sendViaBrevo(opts.to, opts.subject, html, text);
       else await transport!.sendMail({ from: FROM, to: opts.to, subject: opts.subject, html, text });
       status = 'sent';
       console.log(`[tempo] email '${opts.kind}' sent (id=${id})`);
